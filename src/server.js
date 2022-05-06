@@ -1,5 +1,5 @@
 import http from "http";
-import { WebSocketServer } from "ws";
+import SocketIO from "socket.io";
 import express from "express";
 
 const app = express();
@@ -14,20 +14,70 @@ const handleListen = () => console.log("Listening on http://localhost:3000");
 
 // http, ws 둘다 돌릴 수 있는 서버 생성
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+const io = SocketIO(server);
 
-const sockets = [];
-
-wss.on("connection", (socket) => {
-  sockets.push(socket);
-
-  console.log("Connected to Browser!");
-  socket.on("close", () => {
-    console.log("Disconnected from the browser");
+function publicRooms() {
+  const {
+    sockets: {
+      adapter: { sids, rooms },
+    },
+  } = io;
+  const publicRooms = [];
+  rooms.forEach((_, key) => {
+    if (sids.get(key) === undefined) {
+      publicRooms.push(key);
+    }
   });
-  socket.on("message", (message) => {
-    sockets.forEach((aSocket) => aSocket.send(message.toString()));
+  return publicRooms;
+}
+
+io.on("connection", (socket) => {
+  socket["nickname"] = "Anon";
+  socket.onAny((event) => {
+    console.log(io.sockets.adapter);
+    console.log(`Socket Event: ${event}`);
+  });
+  socket.on("enter_room", (roomName, done) => {
+    socket.join(roomName);
+    done();
+    socket.to(roomName).emit("welcome", socket.nickname);
+  });
+  socket.on("disconnecting", () => {
+    socket.rooms.forEach((room) =>
+      socket.to(room).emit("bye", socket.nickname)
+    );
+  });
+  socket.on("new_message", (msg, room, done) => {
+    socket.to(room).emit("new_message", `${socket.nickname}: ${msg}`);
+    done();
+  });
+  socket.on("nickname", (nickname) => {
+    socket["nickname"] = nickname;
   });
 });
+
+// const sockets = [];
+
+// wss.on("connection", (socket) => {
+//   sockets.push(socket);
+//   socket["nickname"] = "Anon";
+//   console.log("Connected to Browser!");
+//   socket.on("close", () => {
+//     console.log("Disconnected from the browser");
+//   });
+//   socket.on("message", (msg) => {
+//     const message = JSON.parse(msg);
+//     switch (message.type) {
+//       case "new_message":
+//         sockets.forEach((aSocket) =>
+//           aSocket.send(`${socket.nickname}: ${message.payload}`)
+//         );
+//         break;
+//       case "nickname":
+//         socket["nickname"] = message.payload;
+//         break;
+//     }
+//   });
+// });
 
 server.listen(3000, handleListen);
