@@ -1,6 +1,7 @@
 import http from "http";
-import SocketIO from "socket.io";
+import { Server } from "socket.io";
 import express from "express";
+import { instrument } from "@socket.io/admin-ui";
 
 const app = express();
 
@@ -14,7 +15,16 @@ const handleListen = () => console.log("Listening on http://localhost:3000");
 
 // http, ws 둘다 돌릴 수 있는 서버 생성
 const server = http.createServer(app);
-const io = SocketIO(server);
+const io = new Server(server, {
+  cors: {
+    origin: ["https://admin.socket.io"],
+    credentials: true,
+  },
+});
+
+instrument(io, {
+  auth: false,
+});
 
 function publicRooms() {
   const {
@@ -31,6 +41,10 @@ function publicRooms() {
   return publicRooms;
 }
 
+function countRoom(roomName) {
+  return io.sockets.adapter.rooms.get(roomName)?.size;
+}
+
 io.on("connection", (socket) => {
   socket["nickname"] = "Anon";
   socket.onAny((event) => {
@@ -40,12 +54,16 @@ io.on("connection", (socket) => {
   socket.on("enter_room", (roomName, done) => {
     socket.join(roomName);
     done();
-    socket.to(roomName).emit("welcome", socket.nickname);
+    socket.to(roomName).emit("welcome", socket.nickname, countRoom(roomName));
+    io.sockets.emit("room_change", publicRooms());
   });
   socket.on("disconnecting", () => {
     socket.rooms.forEach((room) =>
-      socket.to(room).emit("bye", socket.nickname)
+      socket.to(room).emit("bye", socket.nickname, countRoom(room) - 1)
     );
+  });
+  socket.on("disconnect", () => {
+    io.sockets.emit("room_change", publicRooms());
   });
   socket.on("new_message", (msg, room, done) => {
     socket.to(room).emit("new_message", `${socket.nickname}: ${msg}`);
